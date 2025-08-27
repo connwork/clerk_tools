@@ -6,10 +6,11 @@ to get data from churchofjesuschrist.org.
 # This makes JSONType show up as JSONType in the documentation instead of
 # showing the aliased type
 from __future__ import annotations
+from pathlib import Path
+import pandas as pd
 import datetime
 import requests
 from typing import List, Dict, Any, Union, Optional
-import re
 from playwright.sync_api import sync_playwright
 
 JSONType = Union[Dict[str, Any], List[Any]]
@@ -30,59 +31,68 @@ def _host(name: str) -> str:
 
 _endpoints = {
     "action-and-interviews": _host("lcr")
-    + "/api/umlu/report/action-interview-list/full?unitNumber={unit}",
+                             + "/api/umlu/report/action-interview-list/full?unitNumber={unit}",
     "assigned-missionaries": _host("lcr")
-    + "/api/orgs/assigned-missionaries?unitNumber={unit}",
+                             + "/api/orgs/assigned-missionaries?unitNumber={unit}",
     "attendance": _host("lcr")
-    + "/api/umlu/v1/class-and-quorum/attendance/overview/unitNumber/{unit}",
+                  + "/api/umlu/v1/class-and-quorum/attendance/overview/unitNumber/{unit}",
     "birthdays": _host("lcr")
-    + "/api/report/birthday-list/unit/{unit}?month=1&months=12",
+                 + "/api/report/birthday-list/unit/{unit}?month=1&months=12",
     "covenant-path-progress": _host("lcr")
-    + "/api/report/one-work/progress-record?unitNumber={unit}",
+                              + "/api/report/one-work/progress-record?unitNumber={unit}",
     "family-history": _host("lcr")
-    + "/api/report/family-history/activity?unitNumber={unit}",
+                      + "/api/report/family-history/activity?unitNumber={unit}",
     "full-time-missionaries": _host("lcr")
-    + "/api/orgs/full-time-missionaries?unitNumber={unit}",
+                              + "/api/orgs/full-time-missionaries?unitNumber={unit}",
     "group-members": _host("lcr")
-    + "/api/leader-messaging/get-group-members/{unit}/{org_id}",
+                     + "/api/leader-messaging/get-group-members/{unit}/{org_id}",
     "households": _host("directory") + "/api/v4/households?unit={unit}",
     "key-indicators": _host("lcr")
-    + "/api/report/key-indicator/unit/{unit}/8?extended=true&unitNumber={unit}",
+                      + "/api/report/key-indicator/unit/{unit}/8?extended=true&unitNumber={unit}",
     "member-callings-classes": _host("lcr")
-    + "/api/records/member-profile/callings-and-classes/{member_id}",
+                               + "/api/records/member-profile/callings-and-classes/{member_id}",
     "member-list": _host("lcr") + "/api/umlu/report/member-list?unitNumber={unit}",
     "member-photo": _host("directory") + "/api/v4/photos/members/{uuid}",
     "member-service": _host("lcr") + "/api/records/member-profile/service/{member_id}",
     "members-with-callings": _host("lcr")
-    + "/api/report/members-with-callings?unitNumber={unit}",
+                             + "/api/report/members-with-callings?unitNumber={unit}",
     "members-without-callings": _host("lcr")
-    + "/api/orgs/members-without-callings?unitNumber={unit}",
+                                + "/api/orgs/members-without-callings?unitNumber={unit}",
     "ministering": _host("lcr")
-    + "/api/umlu/v1/ministering-assignments/ministering-assignments-report?unitNumber={unit}",
+                   + "/api/umlu/v1/ministering-assignments/ministering-assignments-report?unitNumber={unit}",
     "ministering-full": _host("lcr")
-    + "/api/umlu/v1/ministering/data-full?type=ALL&unitNumber={unit}",
+                        + "/api/umlu/v1/ministering/data-full?type=ALL&unitNumber={unit}",
     "moved-in": _host("lcr") + "/api/report/members-moved-in/unit/{unit}/36",
     "moved-out": _host("lcr") + "/api/report/members-moved-out/unit/{unit}/12",
     "out-of-unit-callings": _host("lcr")
-    + "/api/orgs/out-of-unit-callings?unitNumber={unit}",
+                            + "/api/orgs/out-of-unit-callings?unitNumber={unit}",
     "quarterly-report": _host("lcr")
-    + "/api/report/quarterly-report?populateLabels=true&unitNumber={unit}",
+                        + "/api/report/quarterly-report?populateLabels=true&unitNumber={unit}",
     "quarterly-report-quarters": _host("lcr")
-    + "/api/report/quarterly-report/quarters?unitNumber={unit}",
+                                 + "/api/report/quarterly-report/quarters?unitNumber={unit}",
     "seminary-quarters": _host("lcr") + "/api/report/si-qr/quarters?unitNumber={unit}",
     "seminary-report": _host("lcr") + "/api/report/si-qr/summary?unitNumber={unit}",
     "statistics": _host("lcr") + "/api/report/unit-statistics?unitNumber={unit}",
     "suborganization": _host("lcr")
-    + "/api/orgs/sub-orgs-with-callings?unitNumber={unit}&subOrgId={org_id}",
+                       + "/api/orgs/sub-orgs-with-callings?unitNumber={unit}&subOrgId={org_id}",
     "temple-recommend-status": _host("lcr")
-    + "/api/temple-recommend/report?unitNumber={unit}",
+                               + "/api/temple-recommend/report?unitNumber={unit}",
     "unit-groups": _host("lcr") + "/api/leader-messaging/get-unit-groups",
     "unit-organizations": _host("lcr")
-    + "/api/orgs/sub-orgs-with-callings?unitNumber={unit}",
+                          + "/api/orgs/sub-orgs-with-callings?unitNumber={unit}",
     "units": _host("directory") + "/api/v4/units/{parent_unit}",
     "user": _host("directory") + "/api/v4/user",
+    "lost-member-report": _host("lcr")
+                          + "/api/records/address-unknown/lost-member-report?unitNumber={unit}",
+    "lost-member-details": _host("lcr")
+                          + "/api/records/address-unknown/lost-member-details?memberId={lostmemberid}",
+    "member-profile": _host("lcr")
+                               + "/api/records/member-profile/service/{member_id}",
+    "member-profile-individual": _host("lcr")
+                               + "/api/records/member-profile/individual/{member_id}?lang=eng&skipWarnings=false",
+    "custom-reports": _host("lcr")
+                               + "/api/report/custom-reports/run-report/{report_id}?lang=eng"
 }
-
 
 class ChurchOfJesusChristAPI(object):
     """
@@ -91,12 +101,12 @@ class ChurchOfJesusChristAPI(object):
     """
 
     def __init__(
-        self,
-        username: str,
-        password: str,
-        proxies: dict[str, str] = None,
-        verify_SSL: bool = None,
-        timeout_sec: int = None,
+            self,
+            username: str,
+            password: str,
+            proxies: dict[str, str] = None,
+            verify_SSL: bool = None,
+            timeout_sec: int = None
     ) -> None:
         """
         Parameters:
@@ -120,6 +130,38 @@ class ChurchOfJesusChristAPI(object):
         self.__org_id = None
         self.__timeout_sec = timeout_sec or 15
 
+        #check if cookies are present and if they still work
+        cookiepath = Path("church_of_jesus_christ_api/cookies.txt")
+        cookiepath.parent.mkdir(parents=True, exist_ok=True); cookiepath.touch(exist_ok=True)
+        cookiepath.touch(exist_ok=True)
+        if cookiepath.stat().st_size > 0:
+            try:
+                persistent_cookies = pd.read_csv(cookiepath).to_dict(orient="records")
+                self.__access_token = next(c["value"] for c in persistent_cookies if c["name"] == "oauth_id_token")
+                for c in persistent_cookies:
+                    self.__session.cookies.set(c["name"], c["value"], domain=str(c["domain"]).lstrip("."))
+                self.__session.get(_host("lcr"));
+                self.__session.get(_host("directory"))
+                resp = self.__get_JSON(_endpoints["user"], timeout_sec)
+                if resp.get("authorized") and resp.get("username") == username:
+                    print(f"{resp['preferredName']} is authorized through {resp['username']} without additional login")
+                else:
+                    self.__authenticate(username, password, cookiepath)
+            except Exception:
+                self.__authenticate(username, password, cookiepath)
+        else:
+            self.__authenticate(username, password, cookiepath)
+
+        self.__user_details = self.__get_JSON(_endpoints["user"], self.__timeout_sec)
+
+        # This fails if user doesn't have LCR access
+        try:
+            self.__get_default_org_id()
+        except Exception:
+            pass
+
+    def __authenticate(self, username, password, cookiepath):
+        print("Attempting authentication through playwright")
         p = sync_playwright().start()
         browser = p.chromium.launch(headless=True)
         ctx = browser.new_context()
@@ -139,7 +181,7 @@ class ChurchOfJesusChristAPI(object):
         page.keyboard.press("Enter")
         page.wait_for_url(f"{_host('www')}/**")
 
-        #Warm up and collect cookies from lcr and directory
+        # Warm up and collect cookies from lcr and directory
         all_cookies = []
 
         page.goto(_host("lcr"), wait_until="load")
@@ -161,26 +203,23 @@ class ChurchOfJesusChristAPI(object):
                 c["name"], c["value"], domain=c["domain"].lstrip(".")
             )
 
+        # Save cookies
+        pd.DataFrame(unique_cookies).to_csv(cookiepath, index=False)
+
         # Close Playwright
         browser.close()
         p.stop()
 
-        self.__user_details = self.__get_JSON(_endpoints["user"], self.__timeout_sec)
-
-        # This fails if user doesn't have LCR access
-        try:
-            self.__get_default_org_id()
-        except Exception:
-            pass
-
     def __endpoint(
-        self,
-        name: str,
-        unit: int = None,
-        org_id: int = None,
-        parent_unit: int = None,
-        member_id: int = None,
-        uuid: str = None,
+            self,
+            name: str,
+            unit: int = None,
+            org_id: int = None,
+            parent_unit: int = None,
+            member_id: int = None,
+            uuid: str = None,
+            lostmemberid: str = None,
+            report_id: str = None,
     ) -> str:
         endpoint = _endpoints[name]
 
@@ -206,6 +245,10 @@ class ChurchOfJesusChristAPI(object):
             endpoint = endpoint.replace(
                 "{org_id}", default_if_none(org_id, self.__org_id)
             )
+
+        endpoint = endpoint.replace("{lostmemberid}", str(lostmemberid))
+        endpoint = endpoint.replace("{report_id}", str(report_id))
+
         return endpoint
 
     def __get_JPEG(self, endpoint: str, timeout_sec: int) -> Optional[bytes]:
@@ -227,6 +270,19 @@ class ChurchOfJesusChristAPI(object):
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self.__access_token}",
             },
+            timeout=timeout_sec or self.__timeout_sec,
+        )
+        assert resp.ok, resp.content
+        return resp.json()
+
+    def __put_JSON(self, endpoint: str, body: dict, timeout_sec: int) -> JSONType:
+        resp = self.__session.put(
+            endpoint,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.__access_token}",
+            },
+            json=body,
             timeout=timeout_sec or self.__timeout_sec,
         )
         assert resp.ok, resp.content
@@ -269,7 +325,7 @@ class ChurchOfJesusChristAPI(object):
         return (val if val != None else default).strftime("%Y-%m-%d")
 
     def get_action_and_interviews(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit action and interview list
@@ -290,7 +346,9 @@ class ChurchOfJesusChristAPI(object):
             self.__endpoint("action-and-interviews", unit=unit), timeout_sec
         )
 
-    def get_attendance(self, unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_attendance(
+            self, unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
         """
         Returns the attendance list for the last 5 weeks
 
@@ -309,11 +367,11 @@ class ChurchOfJesusChristAPI(object):
         return self.__get_JSON(self.__endpoint("attendance", unit=unit), timeout_sec)
 
     def get_attendance_date_range(
-        self,
-        start_date: datetime.date = None,
-        end_date: datetime.date = None,
-        unit: int = None,
-        timeout_sec: int = None,
+            self,
+            start_date: datetime.date = None,
+            end_date: datetime.date = None,
+            unit: int = None,
+            timeout_sec: int = None,
     ) -> JSONType:
         """
         Returns the attendance list for a given date range (default 1 year ago to today)
@@ -347,7 +405,9 @@ class ChurchOfJesusChristAPI(object):
             timeout_sec,
         )
 
-    def get_birthdays(self, unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_birthdays(
+            self, unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
         """
         Returns the unit birthday list
 
@@ -365,7 +425,9 @@ class ChurchOfJesusChristAPI(object):
 
         return self.__get_JSON(self.__endpoint("birthdays", unit=unit), timeout_sec)
 
-    def get_directory(self, unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_directory(
+            self, unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
         """
         Returns the unit directory of households
 
@@ -383,7 +445,9 @@ class ChurchOfJesusChristAPI(object):
 
         return self.__get_JSON(self.__endpoint("households", unit=unit), timeout_sec)
 
-    def get_units(self, parent_unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_units(
+            self, parent_unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
         """
         Returns a list of child units for the given parent unit
 
@@ -404,7 +468,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_family_history_report(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit family history report
@@ -425,7 +489,8 @@ class ChurchOfJesusChristAPI(object):
             self.__endpoint("family-history", unit=unit), timeout_sec
         )
 
-    def get_key_indicators(self, unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_key_indicators(
+            self, unit: int = None, timeout_sec: int = None) -> JSONType:
         """
         Returns the unit key indicators
 
@@ -446,7 +511,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_member_callings_and_classes(
-        self, member_id: int = None, timeout_sec: int = None
+            self, member_id: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the callings and class assignments for the given member
@@ -467,7 +532,9 @@ class ChurchOfJesusChristAPI(object):
             self.__endpoint("member-callings-classes", member_id=member_id), timeout_sec
         )
 
-    def get_member_list(self, unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_member_list(
+            self, unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
         """
         Returns the unit member list
 
@@ -486,7 +553,7 @@ class ChurchOfJesusChristAPI(object):
         return self.__get_JSON(self.__endpoint("member-list", unit=unit), timeout_sec)
 
     def download_member_photo(
-        self, uuid: str = None, timeout_sec: int = None
+            self, uuid: str = None, timeout_sec: int = None
     ) -> Optional[bytes]:
         """
         Returns the raw bytes for a member's photo in JPEG format
@@ -507,7 +574,7 @@ class ChurchOfJesusChristAPI(object):
         return self.__get_JPEG(self.__endpoint("member-photo", uuid=uuid), timeout_sec)
 
     def get_member_service(
-        self, member_id: int = None, timeout_sec: int = None
+            self, member_id: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns member's service assignments
@@ -529,7 +596,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_members_with_callings(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit list of members with callings
@@ -551,7 +618,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_members_without_callings(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit list of members without callings
@@ -572,7 +639,9 @@ class ChurchOfJesusChristAPI(object):
             self.__endpoint("members-without-callings", unit=unit), timeout_sec
         )
 
-    def get_ministering(self, unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_ministering(
+            self, unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
         """
         Returns the unit ministering assignments
 
@@ -591,7 +660,7 @@ class ChurchOfJesusChristAPI(object):
         return self.__get_JSON(self.__endpoint("ministering", unit=unit), timeout_sec)
 
     def get_ministering_full(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit ministering assignments as well as interview information
@@ -613,7 +682,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_covenant_path_progress(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit covenant path progress record. Includes information about new members
@@ -635,7 +704,9 @@ class ChurchOfJesusChristAPI(object):
             self.__endpoint("covenant-path-progress", unit=unit), timeout_sec
         )
 
-    def get_moved_in(self, unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_moved_in(
+            self, unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
         """
         Returns the unit list of recently moved in members
 
@@ -653,7 +724,9 @@ class ChurchOfJesusChristAPI(object):
 
         return self.__get_JSON(self.__endpoint("moved-in", unit=unit), timeout_sec)
 
-    def get_moved_out(self, unit: int = None, timeout_sec: int = None) -> JSONType:
+    def get_moved_out(
+            self, unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
         """
         Returns the unit list of recently moved out members
 
@@ -672,7 +745,7 @@ class ChurchOfJesusChristAPI(object):
         return self.__get_JSON(self.__endpoint("moved-out", unit=unit), timeout_sec)
 
     def get_out_of_unit_callings(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit list of members with callings out of unit
@@ -694,7 +767,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_quarterly_reports(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns all available unit quarterly reports
@@ -732,7 +805,7 @@ class ChurchOfJesusChristAPI(object):
         }
 
     def get_seminary_and_institute_quarterly_attendance(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns all availabe seminary/institute quarterly attendance reports
@@ -770,7 +843,7 @@ class ChurchOfJesusChristAPI(object):
         }
 
     def get_temple_recommend_status(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the temple recommend status
@@ -792,7 +865,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_unit_organizations(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit calling/leadership organization structure
@@ -814,7 +887,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_suborganization(
-        self, org_id: int = None, unit: int = None, timeout_sec: int = None
+            self, org_id: int = None, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns information for a given suborganization of a unit
@@ -837,7 +910,7 @@ class ChurchOfJesusChristAPI(object):
         )[0]
 
     def get_full_time_missionaries(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns a list of the members from the unit currently serving missions
@@ -857,7 +930,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_assigned_missionaries(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns a list of the missionaries currently assigned to serve in the unit
@@ -877,7 +950,7 @@ class ChurchOfJesusChristAPI(object):
         )
 
     def get_unit_statistics(
-        self, unit: int = None, timeout_sec: int = None
+            self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the unit statistics
@@ -913,7 +986,7 @@ class ChurchOfJesusChristAPI(object):
         return self.__get_JSON(self.__endpoint("unit-groups"), timeout_sec)
 
     def get_group_members(
-        self, unit: int = None, org_id: int = None, timeout_sec: int = None
+            self, unit: int = None, org_id: int = None, timeout_sec: int = None
     ) -> JSONType:
         """
         Returns the members of a given group, as used by the LCR
@@ -937,3 +1010,141 @@ class ChurchOfJesusChristAPI(object):
         return self.__get_JSON(
             self.__endpoint("group-members", unit=unit, org_id=org_id), timeout_sec
         )
+
+    def get_lost_member_report(
+            self, unit: int = None, timeout_sec: int = None
+    ) -> JSONType:
+        """
+        Returns the unit lost member report
+
+        Parameters
+
+        unit : int
+            Number of the church unit for which to retrieve the report
+        timeout_sec : int
+            Number of seconds to wait for a response when making a request
+
+        Returns
+
+        .. literalinclude:: ../JSON_schemas/get_lost_member_report-schema.md
+        """
+
+        return self.__get_JSON(self.__endpoint("lost-member-report", unit=unit), timeout_sec)
+
+    def get_lost_member_details(
+            self, lostmemberid: int, timeout_sec: int = None
+    ) -> JSONType:
+        """
+        Returns the unit lost member details
+
+        Parameters
+
+        lostmemberId : int
+            Id associated with lost member to retrieve details of, can be found in lost-member-report
+        timeout_sec : int
+            Number of seconds to wait for a response when making a request
+
+        Returns
+
+        .. literalinclude:: ../JSON_schemas/get_lost_member_report-schema.md
+        """
+        if not lostmemberid:
+            raise ValueError("lostmemberid is required")
+        return self.__get_JSON(self.__endpoint("lost-member-details", lostmemberid=lostmemberid), timeout_sec)
+
+    def get_member_profile(
+            self, member_id: int = None, timeout_sec: int = None
+    ) -> JSONType:
+        """
+        Returns the member-profile of a certain member
+
+        Parameters
+
+        unit : int
+            Number of the church unit for which to retrieve the report
+        timeout_sec : int
+            Number of seconds to wait for a response when making a request
+
+        Returns
+
+        .. literalinclude:: ../JSON_schemas/get_member_profile-schema.md
+        """
+
+        return self.__get_JSON(
+            self.__endpoint("member-profile", member_id=member_id), timeout_sec
+        )
+
+    def get_member_profile_individual(
+            self, member_id: int = None, timeout_sec: int = None
+    ) -> JSONType:
+        """
+        Returns the member-profile of a certain member and returns only the 'individual'
+        section of that json, primarily for using put_member_profile_individual function.
+
+        Parameters
+
+        member_id : int
+            ID of the member for which to retrieve information
+        timeout_sec : int
+            Number of seconds to wait for a response when making a request
+
+        Returns
+
+        .. literalinclude:: ../JSON_schemas/get_member_profile_individual-schema.md
+        """
+
+        return self.__get_JSON(
+            self.__endpoint("member-profile", member_id=member_id), timeout_sec
+        ).get("individual", {})
+
+    def put_member_profile_individual(
+            self, body: dict, timeout_sec: int = None
+    ) -> JSONType:
+        """
+        Updates member-profile of a certain member's 'individual' data. Meant to be populated with the
+        get_member_profile_individual function.
+
+        Parameters
+
+        member_id : int
+            Legacy cmsid associated with id of member (I think)
+        timeout_sec : int
+            Number of seconds to wait for a response when making a request
+
+        Returns
+
+        .. literalinclude:: ../JSON_schemas/put_member_profile_individual-schema.md
+        """
+        member_id = body["id"]
+
+        if not member_id:
+            raise ValueError("member_id is required")
+
+        return self.__put_JSON(
+            self.__endpoint("member-profile-individual", member_id=member_id), body, timeout_sec
+        )
+
+    def get_custom_reports(
+            self, report_id: str, timeout_sec: int = None
+    ) -> JSONType:
+        """
+        Returns a specified custom report from the report details page. Especially useful for accessing custom reports
+        that would otherwise require a large amount of api calls (Mission country/language for example)
+
+        Parameters
+
+        report_id : int
+            Id associated with the report to retrieve
+        timeout_sec : int
+            Number of seconds to wait for a response when making a request
+
+        Returns
+
+        .. literalinclude:: ../JSON_schemas/get_lost_member_report-schema.md
+        """
+        if not report_id:
+            raise ValueError("report_id is required")
+
+        return self.__get_JSON(self.__endpoint("custom-reports", report_id=report_id), timeout_sec)
+
+
