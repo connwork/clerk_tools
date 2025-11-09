@@ -9,9 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 import datetime
+import json
 import requests
 from typing import List, Dict, Any, Union, Optional
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 JSONType = Union[Dict[str, Any], List[Any]]
 
@@ -40,6 +41,8 @@ _endpoints = {
                  + "/api/report/birthday-list/unit/{unit}?month=1&months=12",
     "covenant-path-progress": _host("lcr")
                               + "/api/report/one-work/progress-record?unitNumber={unit}",
+    "covenant-path-progress-details": _host("lcr")
+                              + "/api/report/one-work/details/{member_id}",
     "family-history": _host("lcr")
                       + "/api/report/family-history/activity?unitNumber={unit}",
     "full-time-missionaries": _host("lcr")
@@ -91,7 +94,9 @@ _endpoints = {
     "member-profile-individual": _host("lcr")
                                + "/api/records/member-profile/individual/{member_id}?lang=eng&skipWarnings=false",
     "custom-reports": _host("lcr")
-                               + "/api/report/custom-reports/run-report/{report_id}?lang=eng"
+                               + "/api/report/custom-reports/run-report/{report_id}?lang=eng",
+
+
 }
 
 class ChurchOfJesusChristAPI(object):
@@ -120,37 +125,18 @@ class ChurchOfJesusChristAPI(object):
             Number of seconds to wait for a response when making a request
        """
 
-        self.__session = requests.Session()
-        if proxies is not None:
-            self.__session.proxies.update(proxies)
-        self.__session.verify = (
-            verify_SSL if verify_SSL is not None else proxies is None
-        )
         self.__user_details = None
         self.__org_id = None
         self.__timeout_sec = timeout_sec or 15
+        
+        # Playwright browser instance variables (kept open for the lifetime of the object)
+        self.__playwright = None
+        self.__browser = None
+        self.__context = None
+        self.__page = None
 
-        #check if cookies are present and if they still work
-        cookiepath = Path("church_of_jesus_christ_api/cookies.txt")
-        cookiepath.parent.mkdir(parents=True, exist_ok=True); cookiepath.touch(exist_ok=True)
-        cookiepath.touch(exist_ok=True)
-        if cookiepath.stat().st_size > 0:
-            try:
-                persistent_cookies = pd.read_csv(cookiepath).to_dict(orient="records")
-                self.__access_token = next(c["value"] for c in persistent_cookies if c["name"] == "oauth_id_token")
-                for c in persistent_cookies:
-                    self.__session.cookies.set(c["name"], c["value"], domain=str(c["domain"]).lstrip("."))
-                self.__session.get(_host("lcr"));
-                self.__session.get(_host("directory"))
-                resp = self.__get_JSON(_endpoints["user"], timeout_sec)
-                if resp.get("authorized") and resp.get("username") == username:
-                    print(f"{resp['preferredName']} is authorized through {resp['username']} without additional login")
-                else:
-                    self.__authenticate(username, password, cookiepath)
-            except Exception:
-                self.__authenticate(username, password, cookiepath)
-        else:
-            self.__authenticate(username, password, cookiepath)
+        # Authenticate and keep browser open
+        self.__authenticate(username, password)
 
         self.__user_details = self.__get_JSON(_endpoints["user"], self.__timeout_sec)
 
@@ -160,55 +146,45 @@ class ChurchOfJesusChristAPI(object):
         except Exception:
             pass
 
-    def __authenticate(self, username, password, cookiepath):
-        print("Attempting authentication through playwright")
-        p = sync_playwright().start()
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context()
-        page = ctx.new_page()
+    def __authenticate(self, username, password):
+        self.__playwright = sync_playwright().start()
+        
+        # Launch browser with headless=False to keep window visible
+        launch_options = {"headless": False}
+        self.__browser = self.__playwright.chromium.launch(**launch_options)
+        self.__context = self.__browser.new_context()
+        self.__page = self.__context.new_page()
 
         # Go to login page
-        page.goto(f"{_host('www')}/services/platform/v4/login",
+        self.__page.goto(f"{_host('www')}/services/platform/v4/login",
                   wait_until="networkidle",
                   timeout=self.__timeout_sec * 1000)
 
         # Fill username and submit
-        page.locator("input:visible").first.fill(username)
-        page.keyboard.press("Enter")
+        self.__page.locator("input:visible").first.fill(username)
+        self.__page.keyboard.press("Enter")
 
         # Fill password and submit
-        page.locator("input[type='password']:visible").first.fill(password)
-        page.keyboard.press("Enter")
-        page.wait_for_url(f"{_host('www')}/**")
+        self.__page.locator("input[type='password']:visible").first.fill(password)
+        self.__page.keyboard.press("Enter")
+        self.__page.wait_for_url(f"{_host('www')}/**")
 
-        # Warm up and collect cookies from lcr and directory
-        all_cookies = []
+        # Warm up by visiting lcr and directory to establish session
+        try:
+            self.__page.goto(_host("lcr"), wait_until="load", timeout=10_000)
+            self.__page.wait_for_url(_host("lcr"), timeout=5_000)
+        except PlaywrightTimeoutError:
+            print("LCR load timed out, attempting to continue")
+            pass
 
-        page.goto(_host("lcr"), wait_until="load")
-        page.wait_for_url(_host("lcr"))
-        all_cookies.extend(ctx.cookies())
+        try:
+            self.__page.goto(_host("directory"), wait_until="load", timeout=10_000)
+            self.__page.wait_for_url(_host("directory"), timeout=5_000)
+        except PlaywrightTimeoutError:
+            print("Directory load timed out, attempting to continue")
+            pass
 
-        page.goto(_host("directory"), wait_until="load")
-        page.wait_for_url(_host("directory"))
-        all_cookies.extend(ctx.cookies())
-
-        unique_cookies = {(c["name"], c["domain"]): c for c in all_cookies}.values()
-
-        self.__access_token = next(
-            c["value"] for c in unique_cookies if c["name"] == "oauth_id_token"
-        )
-
-        for c in unique_cookies:
-            self.__session.cookies.set(
-                c["name"], c["value"], domain=c["domain"].lstrip(".")
-            )
-
-        # Save cookies
-        pd.DataFrame(unique_cookies).to_csv(cookiepath, index=False)
-
-        # Close Playwright
-        browser.close()
-        p.stop()
+        print("Authentication complete. Browser window will remain open for API calls.")
 
     def __endpoint(
             self,
@@ -236,7 +212,7 @@ class ChurchOfJesusChristAPI(object):
             )
             endpoint = endpoint.replace(
                 "{member_id}",
-                default_if_none(member_id, self.__user_details["individualId"]),
+                default_if_none(member_id, self.__user_details["accountId"]),
             )
             endpoint = endpoint.replace(
                 "{uuid}", default_if_none(uuid, self.__user_details["uuid"])
@@ -252,40 +228,28 @@ class ChurchOfJesusChristAPI(object):
         return endpoint
 
     def __get_JPEG(self, endpoint: str, timeout_sec: int) -> Optional[bytes]:
-        resp = self.__session.get(
+        timeout_ms = (timeout_sec or self.__timeout_sec) * 1000
+        resp = self.__page.request.get(
             endpoint,
             headers={
                 "Accept": "image/jpeg",
-                "Authorization": f"Bearer {self.__access_token}",
             },
-            timeout=timeout_sec or self.__timeout_sec,
+            timeout=timeout_ms,
         )
-        assert resp.ok
-        return None if not resp.content else resp.content
+        assert resp.ok, f"Request failed with status {resp.status}: {resp.text()}"
+        content = resp.body()
+        return None if not content else content
 
     def __get_JSON(self, endpoint: str, timeout_sec: int) -> JSONType:
-        resp = self.__session.get(
+        timeout_ms = (timeout_sec or self.__timeout_sec) * 1000
+        resp = self.__page.request.get(
             endpoint,
             headers={
                 "Accept": "application/json",
-                "Authorization": f"Bearer {self.__access_token}",
             },
-            timeout=timeout_sec or self.__timeout_sec,
+            timeout=timeout_ms,
         )
-        assert resp.ok, resp.content
-        return resp.json()
-
-    def __put_JSON(self, endpoint: str, body: dict, timeout_sec: int) -> JSONType:
-        resp = self.__session.put(
-            endpoint,
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {self.__access_token}",
-            },
-            json=body,
-            timeout=timeout_sec or self.__timeout_sec,
-        )
-        assert resp.ok, resp.content
+        assert resp.ok, f"Request failed with status {resp.status}: {resp.text()}"
         return resp.json()
 
     def __get_default_org_id(self):
@@ -303,8 +267,33 @@ class ChurchOfJesusChristAPI(object):
     def session(self):
         """
         Returns the requests session being used by the API.
+        Note: This is deprecated as API calls now go through Playwright.
         """
-        return self.__session
+        # Return a dummy session for backward compatibility
+        if not hasattr(self, '_session'):
+            self._session = requests.Session()
+        return self._session
+    
+    def close(self):
+        """
+        Closes the Playwright browser and cleans up resources.
+        Call this when you're done with the API instance.
+        """
+        if self.__browser:
+            self.__browser.close()
+        if self.__playwright:
+            self.__playwright.stop()
+        self.__browser = None
+        self.__context = None
+        self.__page = None
+        self.__playwright = None
+    
+    def __del__(self):
+        """Cleanup when object is destroyed"""
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @property
     def user_details(self):
@@ -704,6 +693,29 @@ class ChurchOfJesusChristAPI(object):
             self.__endpoint("covenant-path-progress", unit=unit), timeout_sec
         )
 
+    def get_covenant_path_progress_details(
+            self, member_id: int = None, timeout_sec: int = None
+    ) -> JSONType:
+        """
+        Returns the unit covenant path progress record. Includes information about new members
+        and non-members being taught by the missionaries
+
+        Parameters
+
+        member_id : int
+            ID of the member for which to retrieve the report
+        timeout_sec : int
+            Number of seconds to wait for a response when making a request
+
+        Returns
+
+        .. literalinclude:: ../JSON_schemas/get_covenant_path_progress-schema.md
+        """
+
+        return self.__get_JSON(
+            self.__endpoint("covenant-path-progress-details", member_id=member_id), timeout_sec
+        )
+
     def get_moved_in(
             self, unit: int = None, timeout_sec: int = None
     ) -> JSONType:
@@ -1074,56 +1086,6 @@ class ChurchOfJesusChristAPI(object):
             self.__endpoint("member-profile", member_id=member_id), timeout_sec
         )
 
-    def get_member_profile_individual(
-            self, member_id: int = None, timeout_sec: int = None
-    ) -> JSONType:
-        """
-        Returns the member-profile of a certain member and returns only the 'individual'
-        section of that json, primarily for using put_member_profile_individual function.
-
-        Parameters
-
-        member_id : int
-            ID of the member for which to retrieve information
-        timeout_sec : int
-            Number of seconds to wait for a response when making a request
-
-        Returns
-
-        .. literalinclude:: ../JSON_schemas/get_member_profile_individual-schema.md
-        """
-
-        return self.__get_JSON(
-            self.__endpoint("member-profile", member_id=member_id), timeout_sec
-        ).get("individual", {})
-
-    def put_member_profile_individual(
-            self, body: dict, timeout_sec: int = None
-    ) -> JSONType:
-        """
-        Updates member-profile of a certain member's 'individual' data. Meant to be populated with the
-        get_member_profile_individual function.
-
-        Parameters
-
-        member_id : int
-            Legacy cmsid associated with id of member (I think)
-        timeout_sec : int
-            Number of seconds to wait for a response when making a request
-
-        Returns
-
-        .. literalinclude:: ../JSON_schemas/put_member_profile_individual-schema.md
-        """
-        member_id = body["id"]
-
-        if not member_id:
-            raise ValueError("member_id is required")
-
-        return self.__put_JSON(
-            self.__endpoint("member-profile-individual", member_id=member_id), body, timeout_sec
-        )
-
     def get_custom_reports(
             self, report_id: str, timeout_sec: int = None
     ) -> JSONType:
@@ -1146,5 +1108,6 @@ class ChurchOfJesusChristAPI(object):
             raise ValueError("report_id is required")
 
         return self.__get_JSON(self.__endpoint("custom-reports", report_id=report_id), timeout_sec)
+
 
 
